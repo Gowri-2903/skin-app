@@ -1,4 +1,3 @@
-```python
 from flask import Flask, request, jsonify, send_from_directory
 import os, json, sqlite3, time
 import numpy as np
@@ -18,7 +17,6 @@ CLASS_PATH = os.path.join(BASE_DIR, "class_indices.json")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 🔥 Lazy model loading (safe for Render)
 model = None
 def get_model():
     global model
@@ -51,7 +49,6 @@ def get_disease(name):
     return row
 
 
-# 🔐 LOGIN
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -62,10 +59,7 @@ def login():
         return jsonify({"message": "Login successful", "role": "admin"})
 
     conn = history_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE username=?",
-        (username,)
-    ).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
 
     if user and user["password"].strip() == password:
@@ -74,7 +68,6 @@ def login():
     return jsonify({"error": "Invalid credentials"})
 
 
-# 🔐 CHANGE PASSWORD
 @app.route("/change_password", methods=["PUT"])
 def change_password():
     data = request.get_json()
@@ -82,17 +75,13 @@ def change_password():
     password = data.get("password", "").strip()
 
     conn = history_db()
-    conn.execute(
-        "UPDATE users SET password=? WHERE username=?",
-        (password, username)
-    )
+    conn.execute("UPDATE users SET password=? WHERE username=?", (password, username))
     conn.commit()
     conn.close()
 
     return jsonify({"message": "Password updated"})
 
 
-# 📝 REGISTER
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
@@ -113,7 +102,6 @@ def register():
         conn.close()
 
 
-# 🤖 PREDICT
 @app.route("/predict", methods=["POST"])
 def predict():
     if "image" not in request.files:
@@ -130,8 +118,8 @@ def predict():
     img = img_to_array(img) / 255.0
     img = np.expand_dims(img, axis=0)
 
-    model = get_model()
-    preds = model.predict(img)
+    m = get_model()
+    preds = m.predict(img)
 
     idx = int(np.argmax(preds))
     confidence = float(np.max(preds)) * 100
@@ -180,7 +168,6 @@ def predict():
     })
 
 
-# 📜 HISTORY
 @app.route("/history", methods=["GET"])
 def history():
     conn = history_db()
@@ -202,13 +189,11 @@ def history():
     return jsonify(result)
 
 
-# 📁 IMAGE SERVE
 @app.route("/uploads/<filename>")
 def upload(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
-# 🔥 Render PORT FIX
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
