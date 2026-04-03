@@ -47,7 +47,6 @@ def init_db():
         )
     """)
 
-    # ── history now stores username directly so admin view never depends on JOIN ──
     conn.execute("""
         CREATE TABLE IF NOT EXISTS history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,13 +59,17 @@ def init_db():
         )
     """)
 
-    # ── Add username column if upgrading an existing DB that doesn't have it ──
-    try:
-        conn.execute("ALTER TABLE history ADD COLUMN username TEXT")
-        conn.commit()
-        print("✅ Migrated: added username column to history table.")
-    except sqlite3.OperationalError:
-        pass  # Column already exists — that's fine
+    # ── Migrate existing DB: add any missing columns safely ──
+    for col, col_type in [
+        ("username",  "TEXT"),
+        ("timestamp", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE history ADD COLUMN {col} {col_type}")
+            conn.commit()
+            print(f"✅ Migrated: added '{col}' column to history table.")
+        except sqlite3.OperationalError:
+            pass  # Column already exists — fine
 
     conn.commit()
     conn.close()
@@ -83,16 +86,16 @@ def init_db():
         )
     """)
     diseases = [
-        ("Cellulitis",               "Bacterial skin infection causing redness, swelling, and pain.",         "See a doctor for antibiotics immediately.",           "Keep the area clean and elevated."),
-        ("Impetigo",                 "Highly contagious bacterial skin infection with sores.",                 "Topical or oral antibiotics prescribed by a doctor.", "Avoid touching sores; wash hands frequently."),
-        ("Athlete-Foot",             "Fungal infection causing itching, burning between toes.",               "Use antifungal cream like clotrimazole.",              "Keep feet dry; wear breathable footwear."),
-        ("Nail Fungus",              "Fungal infection causing thickened, discolored nails.",                 "Antifungal medication; consult a dermatologist.",      "Keep nails trimmed and dry."),
-        ("Ringworm",                 "Fungal infection causing ring-shaped rash on skin.",                    "Apply topical antifungal cream.",                      "Avoid sharing personal items."),
-        ("Cutaneous Larva Migrans",  "Parasitic infection causing itchy, winding tracks on skin.",            "Antiparasitic medication prescribed by a doctor.",     "Avoid walking barefoot on contaminated soil."),
-        ("Chickenpox",               "Viral infection causing itchy blister-like rash.",                      "Rest, fluids, antihistamines; see a doctor.",          "Avoid scratching; use calamine lotion."),
-        ("Shingles",                 "Viral infection causing painful rash, often in a stripe.",              "Antiviral drugs; consult a doctor promptly.",          "Keep rash clean; avoid contact with others."),
-        ("Healthy",                  "No skin disease detected. Skin appears healthy.",                       "Maintain regular skincare routine.",                   "Moisturize daily and use sunscreen."),
-        ("Disease Unidentified",     "The image could not be confidently classified.",                        "Consult a dermatologist for accurate diagnosis.",      "Keep the area clean until you see a doctor."),
+        ("Cellulitis",              "Bacterial skin infection causing redness, swelling, and pain.",        "See a doctor for antibiotics immediately.",           "Keep the area clean and elevated."),
+        ("Impetigo",                "Highly contagious bacterial skin infection with sores.",                "Topical or oral antibiotics prescribed by a doctor.", "Avoid touching sores; wash hands frequently."),
+        ("Athlete-Foot",            "Fungal infection causing itching, burning between toes.",              "Use antifungal cream like clotrimazole.",              "Keep feet dry; wear breathable footwear."),
+        ("Nail Fungus",             "Fungal infection causing thickened, discolored nails.",                "Antifungal medication; consult a dermatologist.",      "Keep nails trimmed and dry."),
+        ("Ringworm",                "Fungal infection causing ring-shaped rash on skin.",                   "Apply topical antifungal cream.",                      "Avoid sharing personal items."),
+        ("Cutaneous Larva Migrans", "Parasitic infection causing itchy, winding tracks on skin.",           "Antiparasitic medication prescribed by a doctor.",     "Avoid walking barefoot on contaminated soil."),
+        ("Chickenpox",              "Viral infection causing itchy blister-like rash.",                     "Rest, fluids, antihistamines; see a doctor.",          "Avoid scratching; use calamine lotion."),
+        ("Shingles",                "Viral infection causing painful rash, often in a stripe.",             "Antiviral drugs; consult a doctor promptly.",          "Keep rash clean; avoid contact with others."),
+        ("Healthy",                 "No skin disease detected. Skin appears healthy.",                      "Maintain regular skincare routine.",                   "Moisturize daily and use sunscreen."),
+        ("Disease Unidentified",    "The image could not be confidently classified.",                       "Consult a dermatologist for accurate diagnosis.",      "Keep the area clean until you see a doctor."),
     ]
     conn.executemany(
         "INSERT OR IGNORE INTO disease_info (name, description, recommendation, skincare) VALUES (?, ?, ?, ?)",
@@ -254,7 +257,7 @@ def predict():
     # ── Save to history — store username directly, no JOIN dependency ──
     conn    = history_db()
     user    = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
-    user_id = user["id"] if user else None  # None instead of 1 — safer fallback
+    user_id = user["id"] if user else None
     conn.execute(
         "INSERT INTO history (user_id, username, disease_name, confidence, image_path) VALUES (?, ?, ?, ?, ?)",
         (user_id, username, data["name"], confidence, filename)
@@ -311,8 +314,8 @@ def upload(filename):
 
 @app.route("/admin/users", methods=["GET"])
 def admin_get_users():
-    conn  = history_db()
-    rows  = conn.execute("SELECT id, username, role FROM users ORDER BY id DESC").fetchall()
+    conn = history_db()
+    rows = conn.execute("SELECT id, username, role FROM users ORDER BY id DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -361,7 +364,6 @@ def admin_demote_user():
 @app.route("/admin/history", methods=["GET"])
 def admin_history():
     conn = history_db()
-    # ── No JOIN needed — username is stored directly in history ──
     rows = conn.execute("""
         SELECT id, username, disease_name, confidence, image_path,
                COALESCE(timestamp, '') as timestamp
