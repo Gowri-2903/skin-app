@@ -354,7 +354,8 @@ def admin_demote_user():
 def admin_history():
     conn = history_db()
     rows = conn.execute("""
-        SELECT h.id, u.username, h.disease_name, h.confidence, h.image_path, h.timestamp
+        SELECT h.id, u.username, h.disease_name, h.confidence, h.image_path,
+               COALESCE(h.timestamp, '') as timestamp
         FROM history h
         LEFT JOIN users u ON h.user_id = u.id
         ORDER BY h.id DESC
@@ -369,7 +370,7 @@ def admin_history():
             "disease":    r["disease_name"],
             "confidence": r["confidence"],
             "image":      request.host_url + "uploads/" + os.path.basename(r["image_path"]),
-            "timestamp":  r["timestamp"] if r["timestamp"] else "",
+            "timestamp":  r["timestamp"],
         })
 
     return jsonify(result)
