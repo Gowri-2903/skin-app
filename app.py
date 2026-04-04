@@ -450,6 +450,9 @@ def admin_delete_prediction():
     conn.commit()
     conn.close()
     return jsonify({"message": f"Prediction {prediction_id} deleted"})
+
+
+@app.route("/admin/diseases", methods=["GET"])
 def admin_get_diseases():
     conn = main_db()
     rows = conn.execute("SELECT * FROM disease_info ORDER BY name").fetchall()
