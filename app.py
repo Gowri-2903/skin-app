@@ -71,6 +71,20 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+    # ✅ Backfill username for old records using user_id
+    try:
+        conn.execute("""
+            UPDATE history
+            SET username = (
+                SELECT username FROM users WHERE users.id = history.user_id
+            )
+            WHERE (username IS NULL OR username = '') AND user_id IS NOT NULL
+        """)
+        conn.commit()
+        print("✅ Backfilled usernames for old history records.")
+    except Exception as e:
+        print(f"Backfill skipped: {e}")
+
     conn.commit()
     conn.close()
 
@@ -374,7 +388,6 @@ def admin_history():
             ORDER BY id DESC
         """).fetchall()
     except Exception:
-        # Fallback if timestamp column still missing
         rows = conn.execute("""
             SELECT id, username, disease_name, confidence, image_path
             FROM history
