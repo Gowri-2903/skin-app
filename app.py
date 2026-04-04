@@ -308,7 +308,7 @@ def predict():
         idx          = int(np.argmax(preds))
         confidence   = float(np.max(preds)) * 100
         disease_key  = labels[idx]
-        disease_name = DISEASE_MAPPING.get(disease_key, "Unknown") if confidence >= 80 else "Disease Unidentified"
+        disease_name = DISEASE_MAPPING.get(disease_key, "Unknown") if confidence >= 85 else "Disease Unidentified"
 
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {str(e)}"}), 500
