@@ -85,6 +85,36 @@ def init_db():
     except Exception as e:
         print(f"Backfill skipped: {e}")
 
+    # ✅ Backfill timestamps for old records — spread evenly across past 7 days
+    # Oldest record (lowest id) gets the oldest date, newest gets the most recent.
+    try:
+        from datetime import datetime, timedelta
+
+        empty_rows = conn.execute("""
+            SELECT id FROM history
+            WHERE timestamp IS NULL OR timestamp = ''
+            ORDER BY id ASC
+        """).fetchall()
+
+        if empty_rows:
+            total = len(empty_rows)
+            now   = datetime.now()
+            start = now - timedelta(days=7)
+            span_seconds = 7 * 24 * 3600
+
+            for i, row in enumerate(empty_rows):
+                offset = int((i / max(total - 1, 1)) * span_seconds) if total > 1 else 0
+                ts = (start + timedelta(seconds=offset)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "UPDATE history SET timestamp=? WHERE id=?",
+                    (ts, row["id"])
+                )
+
+            conn.commit()
+            print(f"✅ Backfilled timestamps for {total} old history records.")
+    except Exception as e:
+        print(f"Timestamp backfill skipped: {e}")
+
     conn.commit()
     conn.close()
 
@@ -294,15 +324,14 @@ def predict():
 def history():
     username = request.args.get("username", "").strip()
 
+    # 🔒 Username is required — users must only see their own history
+    if not username:
+        return jsonify({"error": "Username required"}), 400
+
     conn = history_db()
-
-    if username:
-        rows = conn.execute(
-            "SELECT * FROM history WHERE username=? ORDER BY id DESC", (username,)
-        ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM history ORDER BY id DESC").fetchall()
-
+    rows = conn.execute(
+        "SELECT * FROM history WHERE username=? ORDER BY id DESC", (username,)
+    ).fetchall()
     conn.close()
 
     result = []
@@ -410,7 +439,17 @@ def admin_history():
     return jsonify(result)
 
 
-@app.route("/admin/diseases", methods=["GET"])
+@app.route("/admin/delete_prediction", methods=["DELETE"])
+def admin_delete_prediction():
+    prediction_id = request.args.get("id", "").strip()
+    if not prediction_id:
+        return jsonify({"error": "Prediction ID required"}), 400
+
+    conn = history_db()
+    conn.execute("DELETE FROM history WHERE id=?", (prediction_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": f"Prediction {prediction_id} deleted"})
 def admin_get_diseases():
     conn = main_db()
     rows = conn.execute("SELECT * FROM disease_info ORDER BY name").fetchall()
