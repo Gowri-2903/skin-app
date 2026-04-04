@@ -36,7 +36,6 @@ def history_db():
 def init_db():
     conn = history_db()
 
-    # Create tables if not exist
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +57,7 @@ def init_db():
         )
     """)
 
-    # Migrate: safely add missing columns to existing DB
+    # Migrate: safely add missing columns
     migrations = [
         ("username",  "TEXT DEFAULT ''"),
         ("timestamp", "TEXT DEFAULT ''"),
@@ -69,9 +68,9 @@ def init_db():
             conn.commit()
             print(f"✅ Migrated: added '{col}' column to history table.")
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
 
-    # ✅ Backfill username for old records using user_id
+    # Backfill username for old records using user_id
     try:
         conn.execute("""
             UPDATE history
@@ -85,7 +84,7 @@ def init_db():
     except Exception as e:
         print(f"Backfill skipped: {e}")
 
-    # ✅ Fix old records where disease was saved as 'unknown' or 'Unknown'
+    # Fix old records where disease was saved as 'unknown'
     try:
         conn.execute("""
             UPDATE history
@@ -99,11 +98,9 @@ def init_db():
     except Exception as e:
         print(f"Disease name fix skipped: {e}")
 
-    # ✅ Backfill timestamps for old records — spread evenly across past 7 days
-    # Oldest record (lowest id) gets the oldest date, newest gets the most recent.
+    # Backfill timestamps for old records
     try:
         from datetime import datetime, timedelta
-
         empty_rows = conn.execute("""
             SELECT id FROM history
             WHERE timestamp IS NULL OR timestamp = ''
@@ -119,10 +116,7 @@ def init_db():
             for i, row in enumerate(empty_rows):
                 offset = int((i / max(total - 1, 1)) * span_seconds) if total > 1 else 0
                 ts = (start + timedelta(seconds=offset)).strftime("%Y-%m-%d %H:%M:%S")
-                conn.execute(
-                    "UPDATE history SET timestamp=? WHERE id=?",
-                    (ts, row["id"])
-                )
+                conn.execute("UPDATE history SET timestamp=? WHERE id=?", (ts, row["id"]))
 
             conn.commit()
             print(f"✅ Backfilled timestamps for {total} old history records.")
@@ -209,6 +203,23 @@ def get_disease(name):
 @app.route("/")
 def index():
     return jsonify({"status": "ok", "message": "Skin Disease API is running"}), 200
+
+# ─── ONE-TIME FIX ROUTE ───────────────────────────────────────────────────────
+
+@app.route("/fix_diseases")
+def fix_diseases():
+    conn = history_db()
+    conn.execute("""
+        UPDATE history
+        SET disease_name = 'Disease Unidentified'
+        WHERE LOWER(TRIM(disease_name)) = 'unknown'
+           OR disease_name IS NULL
+           OR TRIM(disease_name) = ''
+    """)
+    conn.commit()
+    count = conn.execute("SELECT changes()").fetchone()[0]
+    conn.close()
+    return jsonify({"message": f"Fixed {count} records successfully!"})
 
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
 
@@ -297,7 +308,7 @@ def predict():
         idx          = int(np.argmax(preds))
         confidence   = float(np.max(preds)) * 100
         disease_key  = labels[idx]
-        disease_name = DISEASE_MAPPING.get(disease_key, "Unknown") if confidence >= 70 else "Disease Unidentified"
+        disease_name = DISEASE_MAPPING.get(disease_key, "Unknown") if confidence >= 80 else "Disease Unidentified"
 
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {str(e)}"}), 500
@@ -338,7 +349,6 @@ def predict():
 def history():
     username = request.args.get("username", "").strip()
 
-    # 🔒 Username is required — users must only see their own history
     if not username:
         return jsonify({"error": "Username required"}), 400
 
@@ -380,7 +390,6 @@ def delete_history():
         return jsonify({"error": "ID required"}), 400
 
     conn = history_db()
-    # Only delete if it belongs to this user — safety check
     if username:
         conn.execute(
             "DELETE FROM history WHERE id=? AND username=?",
