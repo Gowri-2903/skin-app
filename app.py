@@ -8,7 +8,6 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ── Use /data/ on Render (persistent disk), fall back to BASE_DIR locally ──
 DATA_DIR = "/data" if os.path.exists("/data") else BASE_DIR
 
 MAIN_DB    = os.path.join(DATA_DIR, "database.db")
@@ -32,12 +31,12 @@ def history_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# ─── INIT DATABASES ───────────────────────────────────────────────────────────
+# ─── INIT & MIGRATE DATABASES ─────────────────────────────────────────────────
 
 def init_db():
-    # --- history.db: users + history ---
     conn = history_db()
 
+    # Create tables if not exist
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,26 +54,27 @@ def init_db():
             disease_name TEXT,
             confidence   REAL,
             image_path   TEXT,
-            timestamp    DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp    TEXT DEFAULT ''
         )
     """)
 
-    # ── Migrate existing DB: add any missing columns safely ──
-    for col, col_type in [
-        ("username",  "TEXT"),
-        ("timestamp", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
-    ]:
+    # Migrate: safely add missing columns to existing DB
+    migrations = [
+        ("username",  "TEXT DEFAULT ''"),
+        ("timestamp", "TEXT DEFAULT ''"),
+    ]
+    for col, col_type in migrations:
         try:
             conn.execute(f"ALTER TABLE history ADD COLUMN {col} {col_type}")
             conn.commit()
             print(f"✅ Migrated: added '{col}' column to history table.")
         except sqlite3.OperationalError:
-            pass  # Column already exists — fine
+            pass  # Column already exists
 
     conn.commit()
     conn.close()
 
-    # --- database.db: disease_info ---
+    # Disease info DB
     conn = main_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS disease_info (
@@ -254,13 +254,14 @@ def predict():
             "skincare":       "Keep area clean."
         }
 
-    # ── Save to history — store username directly, no JOIN dependency ──
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
     conn    = history_db()
     user    = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
     user_id = user["id"] if user else None
     conn.execute(
-        "INSERT INTO history (user_id, username, disease_name, confidence, image_path) VALUES (?, ?, ?, ?, ?)",
-        (user_id, username, data["name"], confidence, filename)
+        "INSERT INTO history (user_id, username, disease_name, confidence, image_path, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, username, data["name"], confidence, filename, timestamp)
     )
     conn.commit()
     conn.close()
@@ -293,6 +294,7 @@ def history():
     result = []
     for r in rows:
         disease = get_disease(r["disease_name"])
+        keys = r.keys()
         result.append({
             "disease":        r["disease_name"],
             "confidence":     r["confidence"],
@@ -300,7 +302,7 @@ def history():
             "description":    disease["description"]    if disease else "",
             "recommendation": disease["recommendation"] if disease else "",
             "skincare":       disease["skincare"]       if disease else "",
-            "timestamp":      r["timestamp"]            if "timestamp" in r.keys() else "",
+            "timestamp":      r["timestamp"] if "timestamp" in keys else "",
         })
 
     return jsonify(result)
@@ -364,23 +366,32 @@ def admin_demote_user():
 @app.route("/admin/history", methods=["GET"])
 def admin_history():
     conn = history_db()
-    rows = conn.execute("""
-        SELECT id, username, disease_name, confidence, image_path,
-               COALESCE(timestamp, '') as timestamp
-        FROM history
-        ORDER BY id DESC
-    """).fetchall()
+    try:
+        rows = conn.execute("""
+            SELECT id, username, disease_name, confidence, image_path,
+                   COALESCE(timestamp, '') as timestamp
+            FROM history
+            ORDER BY id DESC
+        """).fetchall()
+    except Exception:
+        # Fallback if timestamp column still missing
+        rows = conn.execute("""
+            SELECT id, username, disease_name, confidence, image_path
+            FROM history
+            ORDER BY id DESC
+        """).fetchall()
     conn.close()
 
     result = []
     for r in rows:
+        keys = r.keys()
         result.append({
             "id":         r["id"],
             "username":   r["username"] or "unknown",
             "disease":    r["disease_name"],
             "confidence": r["confidence"],
             "image":      request.host_url + "uploads/" + os.path.basename(r["image_path"]),
-            "timestamp":  r["timestamp"],
+            "timestamp":  r["timestamp"] if "timestamp" in keys else "",
         })
 
     return jsonify(result)
