@@ -85,6 +85,20 @@ def init_db():
     except Exception as e:
         print(f"Backfill skipped: {e}")
 
+    # ✅ Fix old records where disease was saved as 'unknown' or 'Unknown'
+    try:
+        conn.execute("""
+            UPDATE history
+            SET disease_name = 'Disease Unidentified'
+            WHERE LOWER(TRIM(disease_name)) = 'unknown'
+               OR disease_name IS NULL
+               OR TRIM(disease_name) = ''
+        """)
+        conn.commit()
+        print("✅ Fixed unknown disease names to 'Disease Unidentified'.")
+    except Exception as e:
+        print(f"Disease name fix skipped: {e}")
+
     # ✅ Backfill timestamps for old records — spread evenly across past 7 days
     # Oldest record (lowest id) gets the oldest date, newest gets the most recent.
     try:
@@ -339,6 +353,7 @@ def history():
         disease = get_disease(r["disease_name"])
         keys = r.keys()
         result.append({
+            "id":             r["id"],
             "disease":        r["disease_name"],
             "confidence":     r["confidence"],
             "image":          request.host_url + "uploads/" + os.path.basename(r["image_path"]),
@@ -354,6 +369,28 @@ def history():
 @app.route("/uploads/<filename>")
 def upload(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
+
+
+@app.route("/history/delete", methods=["DELETE"])
+def delete_history():
+    prediction_id = request.args.get("id", "").strip()
+    username      = request.args.get("username", "").strip()
+
+    if not prediction_id:
+        return jsonify({"error": "ID required"}), 400
+
+    conn = history_db()
+    # Only delete if it belongs to this user — safety check
+    if username:
+        conn.execute(
+            "DELETE FROM history WHERE id=? AND username=?",
+            (prediction_id, username)
+        )
+    else:
+        conn.execute("DELETE FROM history WHERE id=?", (prediction_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Deleted"})
 
 # ─── ADMIN ROUTES ─────────────────────────────────────────────────────────────
 
